@@ -13,13 +13,9 @@ class EncryptionServer
     ) {
         $this->privateKey = @file_get_contents($privateKeyPath);
         $this->publicKey  = @file_get_contents($publicKeyPath);
-
-        $this->throwIfFalse($this->privateKey, "Private key not found");
-        $this->throwIfFalse($this->publicKey, "Public key not found");
     }
 
     /* ================= PUBLIC KEY ================= */
-
     public function getPublicKeyBase64(): string
     {
         $clean = preg_replace('/-----(BEGIN|END) PUBLIC KEY-----|\s/', '', $this->publicKey);
@@ -27,7 +23,6 @@ class EncryptionServer
     }
 
     /* ================= RSA ================= */
-
     public function decryptSessionKey(string $encrypted): string
     {
         $bin = base64_decode($encrypted, true);
@@ -48,7 +43,6 @@ class EncryptionServer
     }
 
     /* ================= AES ================= */
-
     public function decryptAES(string $encryptedData, string $sessionKey): array
     {
         $raw = base64_decode($encryptedData, true);
@@ -91,8 +85,55 @@ class EncryptionServer
         return base64_encode($iv . $tag . $ciphertext);
     }
 
-    /* ================= CLIENT REQUEST ================= */
 
+/* ================= KEY GENERATION ================= */
+public function generatePublicPrivateKey(
+    string $privateKeyPath = "private.pem",
+    string $publicKeyPath  = "public.pem",
+    int $bits = 2048
+): bool {
+    $config = [
+        "private_key_type" => OPENSSL_KEYTYPE_RSA,
+        "private_key_bits" => $bits,
+    ];
+
+    $res = openssl_pkey_new($config);
+    if ($res === false) {
+        throw new Exception("Invalid token format");
+    }
+
+    // Export private key
+    $ok = openssl_pkey_export($res, $privateKey);
+    if (!$ok || empty($privateKey)) {
+        throw new Exception("Invalid token format");
+    }
+
+    // Get public key
+    $details = openssl_pkey_get_details($res);
+    if ($details === false || empty($details['key'])) {
+        throw new Exception("Invalid token format");
+    }
+
+    $publicKey = $details['key'];
+
+    // Save keys
+    if (file_put_contents($privateKeyPath, $privateKey) === false) {
+        throw new Exception("Invalid token format");
+    }
+
+    if (file_put_contents($publicKeyPath, $publicKey) === false) {
+        throw new Exception("Invalid token format");
+    }
+
+    // Secure permissions
+    @chmod($privateKeyPath, 0600);
+    @chmod($publicKeyPath, 0644);
+
+    return true;
+}
+
+
+    /* ================= CLIENT REQUEST ================= */
     public function decryptResponse(array $payload): void
     {
         $this->throwIfFalse(!empty($payload['token']), "Token missing");
@@ -114,6 +155,15 @@ class EncryptionServer
         $token = $this->encryptAES($payload, $this->sessionKey);
 
         $res = ["success" => true, "token" => $token];
+        if ($message) $res["message"] = $message;
+
+        return json_encode($res);
+    }
+
+    public function responseSuccessPlain(array $payload, string $message = null): string
+    {
+
+        $res = ["success" => true, "data" => $payload];
         if ($message) $res["message"] = $message;
 
         return json_encode($res);
