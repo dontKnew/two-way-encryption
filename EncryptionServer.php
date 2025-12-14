@@ -2,7 +2,7 @@
 
 class EncryptionServer
 {
-    public array $decryptedData = [];
+    public array $decryptedData;
     private string $sessionKey;
     private string $privateKey;
     private string $publicKey;
@@ -134,7 +134,7 @@ public function generatePublicPrivateKey(
 
 
     /* ================= CLIENT REQUEST ================= */
-    public function decryptResponse(array $payload): void
+    public function decryptResponse(array $payload): array
     {
         $this->throwIfFalse(!empty($payload['token']), "Token missing");
 
@@ -146,6 +146,7 @@ public function generatePublicPrivateKey(
 
         $this->sessionKey = $this->decryptSessionKey($encryptedSessionKey);
         $this->decryptedData = $this->decryptAES($encryptedData, $this->sessionKey);
+        return $this->decryptedData;
     }
 
     /* ================= RESPONSES ================= */
