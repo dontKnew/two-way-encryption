@@ -2,74 +2,61 @@
 
 class EncryptionServer
 {
-    private $privateKeyPath;
-    private $publicKeyPath;
+    public array $decryptedData = [];
+    private string $sessionKey;
     private string $privateKey;
     private string $publicKey;
-    private string $algo_method = "aes-256-gcm";
 
-    public function __construct(string $privateKeyPath = null, string $publicKeyPath = null)
-    {
-        $this->privateKeyPath = $privateKeyPath;
-        $this->publicKeyPath  = $publicKeyPath;
-        $this->privateKey = @file_get_contents($privateKeyPath ?? "private.pem");
-        $this->publicKey  = @file_get_contents($publicKeyPath ?? "public.pem");
+    public function __construct(
+        string $privateKeyPath = "private.pem",
+        string $publicKeyPath = "public.pem"
+    ) {
+        $this->privateKey = @file_get_contents($privateKeyPath);
+        $this->publicKey  = @file_get_contents($publicKeyPath);
 
-        $this->throwIfFalse($this->privateKey, "Private key file not found or unreadable.");
-        $this->throwIfFalse($this->publicKey,  "Public key file not found or unreadable.");
+        $this->throwIfFalse($this->privateKey, "Private key not found");
+        $this->throwIfFalse($this->publicKey, "Public key not found");
     }
 
-    public function getPublicKey(): string
+    /* ================= PUBLIC KEY ================= */
+
+    public function getPublicKeyBase64(): string
     {
-        return $this->publicKey;
+        $clean = preg_replace('/-----(BEGIN|END) PUBLIC KEY-----|\s/', '', $this->publicKey);
+        return $clean;
     }
 
-    /** ENCRYPT SESSION KEY (RSA) */
-    public function encryptSessionKey(string $sessionKey): string
-    {
-        $publicKey = openssl_pkey_get_public($this->publicKey);
-        $this->throwIfFalse($publicKey, "Invalid RSA public key.");
+    /* ================= RSA ================= */
 
-        $ok = openssl_public_encrypt(
-            $sessionKey,
-            $encryptedKey,
-            $publicKey,
-            OPENSSL_PKCS1_OAEP_PADDING
-        );
-
-        $this->throwIfFalse($ok, "RSA encryption failed.");
-
-        return base64_encode($encryptedKey);
-    }
-
-    /** DECRYPT SESSION KEY (RSA) */
     public function decryptSessionKey(string $encrypted): string
     {
-        $encryptedBin = base64_decode($encrypted, true);
-        $this->throwIfFalse($encryptedBin, "Base64 decode failed for encrypted session key.");
+        $bin = base64_decode($encrypted, true);
+        $this->throwIfFalse($bin, "Invalid base64 session key");
 
-        $privateKey = openssl_pkey_get_private($this->privateKey);
-        $this->throwIfFalse($privateKey, "Invalid RSA private key.");
+        $priv = openssl_pkey_get_private($this->privateKey);
+        $this->throwIfFalse($priv, "Invalid private key");
 
         $ok = openssl_private_decrypt(
-            $encryptedBin,
-            $sessionKeyRaw,
-            $privateKey,
+            $bin,
+            $sessionKey,
+            $priv,
             OPENSSL_PKCS1_OAEP_PADDING
         );
 
-        $this->throwIfFalse($ok, "RSA session key decryption failed.");
-
-        return $sessionKeyRaw;
+        $this->throwIfFalse($ok, "RSA decrypt failed");
+        return $sessionKey;
     }
 
-    /** DECRYPT CLIENT PAYLOAD */
+    /* ================= AES ================= */
+
     public function decryptAES(string $encryptedData, string $sessionKey): array
     {
-        $raw = base64_decode($encryptedData);
+        $raw = base64_decode($encryptedData, true);
+        $this->throwIfFalse($raw, "Invalid base64 payload");
+
         $iv  = substr($raw, 0, 12);
         $tag = substr($raw, 12, 16);
-        $ciphertext  = substr($raw, 28); 
+        $ciphertext = substr($raw, 28);
 
         $json = openssl_decrypt(
             $ciphertext,
@@ -80,77 +67,77 @@ class EncryptionServer
             $tag
         );
 
-        $this->throwIfFalse($json, "AES-GCM decryption failed.");
+        $this->throwIfFalse($json, "AES decrypt failed");
 
-        $decoded = json_decode($json, true);
-        $this->throwIfFalse($decoded !== null, "JSON decode failed.");
-        return $decoded;
+        $data = json_decode($json, true);
+        $this->throwIfFalse(is_array($data), "JSON decode failed");
+
+        return $data;
     }
 
-
-    /** ENCRYPT SERVER RESPONSE */
-   public function encryptAES(array $payload, string $sessionKey): string
+    public function encryptAES(array $payload, string $sessionKey): string
     {
-        $json = json_encode($payload);
-
         $iv = random_bytes(12);
 
-        $encrypted = openssl_encrypt(
-            $json,
+        $ciphertext = openssl_encrypt(
+            json_encode($payload),
             "aes-256-gcm",
             $sessionKey,
             OPENSSL_RAW_DATA,
             $iv,
             $tag
         );
-        return base64_encode($iv . $tag . $encrypted);
+
+        return base64_encode($iv . $tag . $ciphertext);
     }
 
+    /* ================= CLIENT REQUEST ================= */
 
-
-    /** CENTRALIZED ERROR HANDLER */
-    private function throwIfFalse($condition, string $message)
+    public function decryptResponse(array $payload): void
     {
-        if (!$condition) {
-            $error = openssl_error_string();
-            if ($error) {
-                throw new Exception("$message (OpenSSL: $error)");
-            }
-            throw new Exception($message);
+        $this->throwIfFalse(!empty($payload['token']), "Token missing");
+
+        if (!str_contains($payload['token'], '.')) {
+            throw new Exception("Invalid token format");
+        }
+
+        [$encryptedData, $encryptedSessionKey] = explode('.', $payload['token'], 2);
+
+        $this->sessionKey = $this->decryptSessionKey($encryptedSessionKey);
+        $this->decryptedData = $this->decryptAES($encryptedData, $this->sessionKey);
+    }
+
+    /* ================= RESPONSES ================= */
+
+    public function responseSuccess(array $payload, string $message = null): string
+    {
+        $token = $this->encryptAES($payload, $this->sessionKey);
+
+        $res = ["success" => true, "token" => $token];
+        if ($message) $res["message"] = $message;
+
+        return json_encode($res);
+    }
+
+    public function responsePublicKey(): string
+    {
+        return json_encode([
+            "success" => true,
+            "token" => $this->getPublicKeyBase64()
+        ]);
+    }
+
+    public function responseFailed(string $message): string
+    {
+        return json_encode(["success" => false, "message" => $message]);
+    }
+
+    /* ================= UTIL ================= */
+
+    private function throwIfFalse($cond, string $msg): void
+    {
+        if (!$cond) {
+            throw new Exception($msg);
         }
     }
-
-    public function getAESKey(){
-        return random_bytes(32);
-    }
-
-    public function generatePublicPrivateKey(){
-        $keys = openssl_pkey_new([
-            "private_key_bits" => 2048,
-            "private_key_type" => OPENSSL_KEYTYPE_RSA,
-        ]);
-
-        openssl_pkey_export($keys, $privateKey);
-        $publicKey = openssl_pkey_get_details($keys)["key"];
-
-        file_put_contents($this->privateKeyPath, $privateKey);
-        file_put_contents($this->publicKeyPath, $publicKey);
-    }
 }
-
-
-
-/* Example 
-<?php
-ini_set('display_errors', 1);
-require_once "EncryptionServer.php";
-
-try {
-    $enc = new EncryptionServer();
-    $key = $enc->getAESKey();
-    $encrypted = $enc->encryptAES(['sajid', 'krishan', 'aman'], $key);
-    $decrypted = $enc->decryptAES($encrypted, $key);
-} catch(Exception $e) {
-    echo $e->getMessage();
-}
-*/

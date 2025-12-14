@@ -1,5 +1,7 @@
+<!-- // https://javascriptobfuscator.com/Javascript-Obfuscator.aspx -->
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,12 +27,12 @@
 
                             <div class="mb-3">
                                 <label class="form-label">Username</label>
-                                <input type="text" id="username" class="form-control" required>
+                                <input value="raju" type="text" id="username" class="form-control" required>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">Password</label>
-                                <input type="password" id="password" class="form-control" required>
+                                <input value="123" type="password" id="password" class="form-control" required>
                             </div>
 
                             <button type="submit" class="btn btn-primary w-100">
@@ -44,21 +46,30 @@
             </div>
         </div>
     </div>
-    <script src="script-minify.js"></script>
+    <script src="script.js"></script>
     <script>
         document.getElementById("loginForm").addEventListener("submit", async (e) => {
-            e.preventDefault(); 
+            e.preventDefault();
             const formData = {
                 username: document.getElementById("username").value,
                 password: document.getElementById("password").value
             };
             try {
-                const response = await EncryptedAPI.send("/api.php?action=test-api",formData);
-                console.log("Decrypted server response:", response);
-                alert("Secure response received. Check console.");
+                const api = new EncryptedAPI();
+                const result = await api.send("/api.php?action=verify-token", formData);
+                console.log(result);
             } catch (err) {
-                console.error("EncryptedAPI Error:", err);
-                alert("Error sending encrypted request");
+                console.error(err);
+                switch (err.message) {
+                    case "PUBLIC_KEY_FETCH_FAILED":
+                        alert("Server unavailable");
+                        break;
+                    case "AES_DECRYPTION_FAILED":
+                        alert("Invalid session or tampered data");
+                        break;
+                    default:
+                        alert("Something went wrong");
+                }
             }
         });
     </script>
