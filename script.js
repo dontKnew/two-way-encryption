@@ -2,7 +2,7 @@ class EncryptedAPI {
 
     constructor(options = {}) {
         this.tokenKey = options.tokenKey || "token";
-        this.tokenUrl = options.tokenUrl || "/api.php?action=token";
+        this.tokenUrl = options.tokenUrl || "https://johntv.live/api/v1/token";
     }
 
     /* ================= PUBLIC ================= */
@@ -42,7 +42,6 @@ class EncryptedAPI {
             return await this.decryptResponse(aesKey, encryptedResp.token);
 
         } catch (err) {
-            console.error("EncryptedAPI.send error:", err);
             throw err; // rethrow for caller
         }
     }
@@ -54,7 +53,10 @@ class EncryptedAPI {
             let pem = localStorage.getItem(this.tokenKey);
 
             if (!pem) {
-                const res = await fetch(this.tokenUrl);
+                const res = await fetch(this.tokenUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                });
 
                 if (!res.ok) {
                     throw new Error("PUBLIC_KEY_FETCH_FAILED");

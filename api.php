@@ -25,7 +25,7 @@ try {
             echo $enc->responseFailed("Invalid JSON");
             exit;
         }
-        $enc->decryptResponse($payload);
+        $enc->decryptResponse($payload);    
 
         echo $enc->responseSuccess(
             ["data" => $enc->decryptedData, 'success'=>true, 'message'=>"data fetch successfully"],

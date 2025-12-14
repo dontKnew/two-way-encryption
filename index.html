@@ -56,10 +56,10 @@
             };
             try {
                 const api = new EncryptedAPI();
-                const result = await api.send("/api.php?action=verify-token", formData);
+                const result = await api.send("https://johntv.live/api/v1/verify-token", formData);
                 console.log(result);
             } catch (err) {
-                console.error(err);
+                console.error(err.message);
                 switch (err.message) {
                     case "PUBLIC_KEY_FETCH_FAILED":
                         alert("Server unavailable");
