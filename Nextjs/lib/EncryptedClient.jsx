@@ -50,38 +50,53 @@ class EncryptedClient {
     }
   }
 
-  /* ================= PRIVATE: KEY HANDLING ================= */
+/* ================= PRIVATE: KEY HANDLING ================= */
+async #fetchPublicKey() {
+  const EXPIRY_MS = 60 * 60 * 1000; // 1 hour (change as needed)
+  const expiryKey = `${this.#tokenKey}_expiry`;
 
-  async #fetchPublicKey() {
-    try {
-      let pem = localStorage.getItem(this.#tokenKey);
+  try {
+    let pem = localStorage.getItem(this.#tokenKey);
+    const expiry = localStorage.getItem(expiryKey);
 
-      if (!pem) {
-        const res = await fetch(this.#tokenUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
+    const isExpired = !expiry || Date.now() > Number(expiry);
 
-        if (!res.ok) {
-          throw new Error("PUBLIC_KEY_FETCH_FAILED");
-        }
+    if (!pem || isExpired) {
+      localStorage.removeItem(this.#tokenKey);
+      localStorage.removeItem(expiryKey);
 
-        const data = await res.json();
+      const res = await fetch(this.#tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
 
-        if (!data || !data.token) {
-          throw new Error("INVALID_PUBLIC_KEY_RESPONSE");
-        }
-
-        pem = data.token;
-        localStorage.setItem(this.#tokenKey, pem);
+      if (!res.ok) {
+        throw new Error("PUBLIC_KEY_FETCH_FAILED");
       }
 
-      return await this.#importRSAPublicKey(pem);
-    } catch (err) {
-      localStorage.removeItem(this.#tokenKey);
-      throw err;
+      const data = await res.json();
+
+      if (!data || !data.token) {
+        throw new Error("INVALID_PUBLIC_KEY_RESPONSE");
+      }
+
+      pem = data.token;
+
+      localStorage.setItem(this.#tokenKey, pem);
+      localStorage.setItem(
+        expiryKey,
+        Date.now() + EXPIRY_MS
+      );
     }
+
+    return await this.#importRSAPublicKey(pem);
+  } catch (err) {
+    localStorage.removeItem(this.#tokenKey);
+    localStorage.removeItem(`${this.#tokenKey}_expiry`);
+    throw err;
   }
+}
+
 
   async #importRSAPublicKey(pem) {
     try {
